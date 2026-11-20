@@ -1,0 +1,59 @@
+name: ClipBridge Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Validate Python code
+        run: python -m py_compile clipbridge.py
+
+      - name: Generate sample video
+        run: |
+          ffmpeg -f lavfi -i testsrc2=size=320x240:rate=25 -t 5 -c:v libx264 sample.mp4
+
+      - name: Test vertical clip generation
+        run: |
+          python clipbridge.py sample.mp4 --duration 2 --count 2
+
+      - name: Verify output
+        run: |
+          python - <<'PY'
+          import subprocess
+          import json
+          from pathlib import Path
+
+          clips = list(Path("clips").glob("*.mp4"))
+          assert len(clips) == 2
+
+          for clip in clips:
+              data = json.loads(subprocess.check_output([
+                  "ffprobe", "-v", "error",
+                  "-select_streams", "v:0",
+                  "-show_entries", "stream=width,height",
+                  "-of", "json", str(clip)
+              ]))
+              stream = data["streams"][0]
+              assert stream["width"] == 1080
+              assert stream["height"] == 1920
+
+          print("All tests passed.")
+          PY
